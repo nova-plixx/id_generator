@@ -30,7 +30,7 @@ func interceptor(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, 
 
 func main() {
 	listener, err := net.Listen("tcp", ":4040")
-	panicIfErrored(err)
+	handle(err)
 	srv := grpc.NewServer(grpc.UnaryInterceptor(interceptor))
 	pb.RegisterIdServiceServer(srv, &server{idGenerator: provideIdGenerator()})
 	reflection.Register(srv)
@@ -65,7 +65,7 @@ var generatorId int
 
 func provideIdGenerator() domain.IdGenerator {
 	conn, _, err := zk.Connect([]string{"127.0.0.1:2181"}, time.Second)
-	panicIfErrored(err)
+	handle(err)
 	defer conn.Close()
 
 	sharedSeed := fetchZkInt64ConfigVal(conn, "/id_generator/shared_seed")
@@ -78,15 +78,15 @@ func provideIdGenerator() domain.IdGenerator {
 		startEpoch,
 		&domain.SystemClock{},
 	)
-	panicIfErrored(err)
+	handle(err)
 	return gen
 }
 
 func fetchZkInt64ConfigVal(conn *zk.Conn, path string) int64 {
 	valBytes, _, err := conn.Get(path)
-	panicIfErrored(err)
+	handle(err)
 	val, err := strconv.Atoi(string(valBytes))
-	panicIfErrored(err)
+	handle(err)
 	return int64(val)
 }
 
@@ -94,42 +94,42 @@ func fetchZkGeneratorId(conn *zk.Conn) int {
 	lock := acquireLock(conn, "/id_generator/instance_id/assign_lock")
 	defer releaseLock(lock)
 	children, _, err := conn.Children("/id_generator/instance_id")
-	panicIfErrored(err)
+	handle(err)
 	assignedId := children[0]
 	err = conn.Delete("/id_generator/instance_id/"+assignedId, -1)
-	panicIfErrored(err)
+	handle(err)
 	id, err := strconv.Atoi(assignedId)
-	panicIfErrored(err)
+	handle(err)
 	log.Printf("Using generator id: %v", id)
 	return id
 }
 
 func freeZkGeneratorId() {
 	conn, _, err := zk.Connect([]string{"127.0.0.1:2181"}, time.Second)
-	panicIfErrored(err)
+	handle(err)
 	defer conn.Close()
 	lock := acquireLock(conn, "/id_generator/instance_id/release_lock")
 	defer releaseLock(lock)
 	instanceId := "/id_generator/instance_id/" + strconv.Itoa(generatorId)
 	_, err = conn.Create(instanceId, nil, 0, zk.WorldACL(zk.PermAll))
-	panicIfErrored(err)
+	handle(err)
 	log.Printf("Releasing generator id: %v", generatorId)
 }
 
 func acquireLock(conn *zk.Conn, path string) *zk.Lock {
 	lock := zk.NewLock(conn, path, zk.WorldACL(zk.PermAll))
 	err := lock.Lock()
-	panicIfErrored(err)
+	handle(err)
 	return lock
 }
 
 func releaseLock(lock *zk.Lock) {
 	err := lock.Unlock()
-	panicIfErrored(err)
+	handle(err)
 }
 
-func panicIfErrored(err error) {
+func handle(err error) {
 	if err != nil {
-		panic(err)
+		log.Fatal("Error while initializing the server: ", err)
 	}
 }
